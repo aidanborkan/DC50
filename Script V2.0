@@ -24,7 +24,8 @@ def HillEquation(x, bottom, top, EC50, nH):
 #04.02.2024: Protein Normalization module incorporated with automated JESS western which uses in-capillary electrophoresis
 #Electropherogram measures chemiluminescent signal intensity of target analyte and is normalized against the total amount of protein within sample. 
 # Initialize am empty list for normalized total area under the curve ('Total AUC')
-Total_AUC = []
+
+Total_AUC_list = []
 #concentration scale can be modified - this example relies on nanomolar
 #initialize an empty list for concentrations
 concentrations = []
@@ -54,13 +55,13 @@ with open('PT65_DC50_03262024.csv', 'r') as file:
         
         # Case handling if the conversion to float fails
         try:
-            Total_AUC = float(Total_AUC_str)
+            Total_AUC_value = float(Total_AUC_str)
         except ValueError:
             continue
     
         #Append concentration to concentration list
         #Append ratio to ratio list
-        Total_AUC.append(Total_AUC)
+        Total_AUC_list.append(Total_AUC_value)
         concentrations.append(concentration)
 
 # Convert sample and ratio lists to numpy arrays
@@ -68,7 +69,7 @@ with open('PT65_DC50_03262024.csv', 'r') as file:
 #converting this to a float
 
 concentrations = np.array(concentrations)
-Total_AUC = np.array(Total_AUC, dtype=float)
+Total_AUC = np.array(Total_AUC_list, dtype=float)
 
 # Need to normalize our data
 normalized_Total_AUC = (Total_AUC - np.min(Total_AUC)) / (np.max(Total_AUC) - np.min(Total_AUC))
@@ -91,15 +92,15 @@ def HillEquationWithInit(x, bottom, top, EC50, nH):
 #setting p0 by providing intial guesses for the parameters - [bottom, top, EC50, nH] and nH is slope which 
 #I will set as default 1
 
-bottom_init = np.min(normalized_ratios)
-top_init = np.max(normalized_ratios)
+bottom_init = np.min(normalized_Total_AUC)
+top_init = np.max(normalized_Total_AUC)
 EC50_init = 30.0
 nH_init = 1.0
 # Initial guesses for the parameters of the curve function
 p0 = [bottom_init, top_init, EC50_init, nH_init]
 
 #must pass this as an argument to curve_fit
-popt, pcov = curve_fit(HillEquationWithInit, concentrations_reshaped, normalized_ratios, p0=p0, maxfev=5000)
+popt, pcov = curve_fit(HillEquationWithInit, concentrations_reshaped, normalized_Total_AUC, p0=p0, maxfev=5000)
 #print
 print(popt)
 
@@ -109,7 +110,7 @@ y_values = HillEquation(x_values, *popt)
                      
 # Create scatter plot for individual data points
 marker_size = 50
-plt.scatter(concentrations, normalized_ratios, s=marker_size, color='blue', label='Data')
+plt.scatter(concentrations, normalized_Total_AUC, s=marker_size, color='blue', label='Data')
 
 #Define the Hill equation: taken from Github
 # y = bottom + ((top - bottom) * xnH) / (EC50nH+ xnH)
@@ -126,7 +127,7 @@ zero_index = np.argmin(np.abs(concentrations - 0))
 half_reduction_index_relative = zero_index + half_reduction_index
 
 # Define full TPD
-threshold_100 = np.min(normalized_ratios)
+threshold_100 = np.min(normalized_Total_AUC)
 full_reduction_index = np.argmin(np.abs(normalized_Total_AUC - threshold_100))
 
 # Plot the curve fit
