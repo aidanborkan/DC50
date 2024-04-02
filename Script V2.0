@@ -6,12 +6,12 @@ import csv
 from scipy.optimize import curve_fit
 
 #start by defining the Hill Equation
-#x is independent variable - concentration
+#x is independent variable - drug concentration with scale in nanomolar (nM)
 #y = bottom + ((top - bottom) * xnH) / (EC50nH+ xnH)
 
 def HillEquation(x, bottom, top, EC50, nH):
-    #setting a lower bound for EC50
-    #non-negative x
+    #setting a lower bound for EC50 - restriction of left boundary
+    #non-negative x, also non-zero
     x = np.maximum(x, 0.01)
     
     return bottom + ((top-bottom) * (x ** nH) / (EC50 ** nH + (x ** nH))) 
@@ -21,14 +21,16 @@ def HillEquation(x, bottom, top, EC50, nH):
     #denominator = np.where(denominator == 0, np.finfo(float).eps, denominator)
         
 #Note: the ratios are extracted from imageJ analysis of band intensity of target analyte and loading control stored in a CSV
-# Initialize am empty list for sample ratio values
-ratios = []
+#04.02.2024: Protein Normalization module incorporated with automated JESS western which uses in-capillary electrophoresis
+#Electropherogram measures chemiluminescent signal intensity of target analyte and is normalized against the total amount of protein within sample. 
+# Initialize am empty list for normalized total area under the curve ('Total AUC')
+Total_AUC = []
 #concentration scale can be modified - this example relies on nanomolar
 #initialize an empty list for concentrations
 concentrations = []
 
-# Read data from the CSV file
-with open('DataFrame_for_GSK3ab.csv', 'r') as file:
+# Read data from the CSV file - modify file path accordingly
+with open('PT65_DC50_03262024.csv', 'r') as file:
     f_csv = csv.reader(file)
     # Skip the header row
     header = next(f_csv)  
@@ -37,44 +39,46 @@ with open('DataFrame_for_GSK3ab.csv', 'r') as file:
     for row in f_csv:
         #modulate here based off location of sample identifiers
         #python begins with an index of 0
-        sample = row[3]
-        ratio_str, concentration_str = row[2], row[3]
+        sample = row[1]
+        Total_AUC_str, concentration_str = row[2], row[3]
     
         # Get rid of trailing and leading whitespaces
-        ratio_str = ratio_str.strip()
+        Total_AUC_str = Total_AUC_str.strip()
         concentration_str = concentration_str.strip()
         
         #extract our ratio value
-        ratio = float(ratio_str)
+        Total_AUC = float(Total_AUC_str)
         
         #Extract the concentration value
         concentration = float(concentration_str.split()[0])
         
         # Case handling if the conversion to float fails
         try:
-            ratio = float(ratio_str)
+            Total_AUC = float(Total_AUC_str)
         except ValueError:
             continue
     
         #Append concentration to concentration list
         #Append ratio to ratio list
-        ratios.append(ratio)
+        Total_AUC.append(Total_AUC)
         concentrations.append(concentration)
 
 # Convert sample and ratio lists to numpy arrays
 #to do this we need to split the sample name with whitespace as the delimiter and extract the numeric value
 #converting this to a float
+
 concentrations = np.array(concentrations)
-ratios = np.array(ratios, dtype=float)
+Total_AUC = np.array(Total_AUC, dtype=float)
 
 # Need to normalize our data
-normalized_ratios = (ratios - np.min(ratios)) / (np.max(ratios) - np.min(ratios))
+normalized_Total_AUC = (Total_AUC - np.min(Total_AUC)) / (np.max(Total_AUC) - np.min(Total_AUC))
 
 #normalized ratio is a 2D array - reshape the concentration
 concentrations_reshaped = concentrations.reshape(-1)
 
 # Generate x values for the curve
 #can modulate the axis length
+
 x_values = np.linspace(np.min(concentrations_reshaped), np.max(concentrations_reshaped), 100)
 
 #can set a vertifical shift parameter 
@@ -112,8 +116,8 @@ plt.scatter(concentrations, normalized_ratios, s=marker_size, color='blue', labe
 # https://github.com/himoto/hillfit
 
 # Define 50% reduction (This is DC50)
-threshold_50 = np.min(normalized_ratios) + (np.max(normalized_ratios) - np.min(normalized_ratios)) * 0.5
-half_reduction_index = np.argmin(np.abs(normalized_ratios - threshold_50))
+threshold_50 = np.min(normalized_Total_AUC) + (np.max(normalized_Total_AUC) - np.min(normalized_Total_AUC)) * 0.5
+half_reduction_index = np.argmin(np.abs(normalized_Total_AUC - threshold_50))
 
 #Tell python where the concentration = 0 (since we cannot divide by 0, x was set to 0.01 for DMSO)
 zero_index = np.argmin(np.abs(concentrations - 0))
@@ -123,7 +127,7 @@ half_reduction_index_relative = zero_index + half_reduction_index
 
 # Define full TPD
 threshold_100 = np.min(normalized_ratios)
-full_reduction_index = np.argmin(np.abs(normalized_ratios - threshold_100))
+full_reduction_index = np.argmin(np.abs(normalized_Total_AUC - threshold_100))
 
 # Plot the curve fit
 plt.plot(x_values, y_values, 'r-', label='Curve Fit')
@@ -139,8 +143,8 @@ tick_labels = unique_concentrations[tick_indices]
 plt.xticks(concentrations, rotation=90)  
 #labels and title
 plt.xlabel('Dosage Concentration (nM)')
-plt.ylabel('Normalized Ratio of GSK-3α/β to GAPDH')
-plt.title('Normalized Ratio GSK-3α/β: GAPDH by Dosage Concentration')
+plt.ylabel('Normalized Total AUC of GSK-3α/β')
+plt.title('Normalized Ratio GSK-3α/β by Dosage Concentration')
 #want a legend
 plt.legend(loc='best')
 #grid format
