@@ -1,0 +1,116 @@
+#04.02.2024: we likely need to model each subunit separately - can we take mean of each reading 2-4? 
+
+
+# Import statements
+import hillfit
+import numpy as np
+import matplotlib.pyplot as plt
+import csv
+from scipy.optimize import curve_fit
+from collections import defaultdict
+
+#start by defining the Hill Equation
+#x is independent variable - drug concentration with scale in nanomolar (nM)
+#y = bottom + ((top - bottom) * xnH) / (EC50nH+ xnH)
+
+def HillEquation(x, bottom, top, EC50, nH):
+    #setting a lower bound for EC50 - restriction of left boundary
+    #non-negative x, also non-zero
+    x = np.maximum(x, 0.01)
+    
+    return bottom + ((top-bottom) * (x ** nH) / (EC50 ** nH + (x ** nH))) 
+
+    #denominator = EC50 ** nH + (x ** nH)
+    #we need to handle the case when x (concetration) is 0
+    #denominator = np.where(denominator == 0, np.finfo(float).eps, denominator)
+        
+#Note: the ratios are extracted from imageJ analysis of band intensity of target analyte and loading control stored in a CSV
+#04.02.2024: Protein Normalization module incorporated with automated JESS western which uses in-capillary electrophoresis
+#Electropherogram measures chemiluminescent signal intensity of target analyte and is normalized against the total amount of protein within sample. 
+
+
+# Initialize two empty defaultdicts for normalized total AUCs
+Total_AUC_by_concentration_GSK3a = defaultdict(list)
+Total_AUC_by_concentration_GSK3b = defaultdict(list)
+
+# Read data from the CSV file
+with open('combined_PT65_03262024.csv', 'r') as file:
+    f_csv = csv.reader(file)
+    header = next(f_csv)  # Skip the header row
+
+    for row in f_csv:
+        try:
+            #python has an index of zero
+            concentration = float(row[0].strip())
+            AUC_GSK3a = float(row[3].strip())
+            AUC_GSK3b = float(row[2].strip())
+
+            
+            # Append the AUC values to the lists corresponding to the concentration
+            Total_AUC_by_concentration_GSK3a[concentration].append(AUC_GSK3a)
+            Total_AUC_by_concentration_GSK3b[concentration].append(AUC_GSK3b)
+            
+        except ValueError:
+            continue
+
+# Calculate the mean Total AUC for each concentration
+concentrations = np.array(list(Total_AUC_by_concentration_GSK3a.keys()))
+mean_Total_AUC_GSK3a = np.array([np.mean(aucs) for aucs in Total_AUC_by_concentration_GSK3a.values()])
+mean_Total_AUC_GSK3b = np.array([np.mean(aucs) for aucs in Total_AUC_by_concentration_GSK3b.values()])
+
+# Normalize the mean Total AUC values
+normalized_mean_Total_AUC_GSK3a = (mean_Total_AUC_GSK3a - np.min(mean_Total_AUC_GSK3a)) / (np.max(mean_Total_AUC_GSK3a) - np.min(mean_Total_AUC_GSK3a))
+normalized_mean_Total_AUC_GSK3b = (mean_Total_AUC_GSK3b - np.min(mean_Total_AUC_GSK3b)) / (np.max(mean_Total_AUC_GSK3b) - np.min(mean_Total_AUC_GSK3b))
+
+# Generate x values for the curve fitting
+x_values = np.linspace(np.min(concentrations), np.max(concentrations), 100)
+
+# Define initial guesses for the parameters
+p0 = [np.min(normalized_mean_Total_AUC_GSK3a), np.max(normalized_mean_Total_AUC_GSK3a), 30.0, 1.0]
+
+# Curve fitting for GSK-3a
+popt_a, pcov_a = curve_fit(HillEquation, concentrations, normalized_mean_Total_AUC_GSK3a, p0=p0, maxfev=5000)
+#inspect
+print("Fitted parameters for GSK-3a:")
+print(f"Bottom: {popt_a[0]}, Top: {popt_a[1]}, EC50: {popt_a[2]}, nH: {popt_a[3]}")
+
+# Curve fitting for GSK-3b
+popt_b, pcov_b = curve_fit(HillEquation, concentrations, normalized_mean_Total_AUC_GSK3b, p0=p0, maxfev=5000)
+print("Fitted parameters for GSK-3b:")
+print(f"Bottom: {popt_b[0]}, Top: {popt_b[1]}, EC50: {popt_b[2]}, nH: {popt_b[3]}")
+
+# Generate y values using the fitted parameters
+y_values_GSK3a = HillEquation(x_values, *popt_a)
+y_values_GSK3b = HillEquation(x_values, *popt_b)
+
+# Plotting
+plt.figure(figsize=(10, 8))
+
+# Scatter plots for the data points
+plt.scatter(concentrations, normalized_mean_Total_AUC_GSK3a, color='green', label='GSK-3a Data Points')
+plt.scatter(concentrations, normalized_mean_Total_AUC_GSK3b, color='blue', label='GSK-3b Data Points')
+
+# Curve fits
+plt.plot(x_values, y_values_GSK3a, 'g--', label='GSK-3a Fit')
+plt.plot(x_values, y_values_GSK3b, 'b--', label='GSK-3b Fit')
+
+# Extract the EC50 values from the fitted parameters
+EC50_GSK3a = popt_a[2]
+EC50_GSK3b = popt_b[2]
+
+print(f"EC50 for GSK-3a: {EC50_GSK3a} nM")
+print(f"EC50 for GSK-3b: {EC50_GSK3b} nM")
+
+# Add vertical lines for the estimated EC50 values
+plt.axvline(x=popt_a[2], color='darkgreen', linestyle='--', label='GSK-3a EC50')
+plt.axvline(x=popt_b[2], color='navy', linestyle='--', label='GSK')
+
+# Set labels and title
+plt.xlabel('Dosage Concentration (nM)')
+plt.ylabel('Normalized Total AUC')
+plt.title('Dose-Response Curve for GSK-3a and GSK-3b')
+plt.legend()
+plt.grid(True)
+plt.xticks(ticks=concentrations, labels=concentrations, rotation=45)
+plt.tight_layout()
+plt.show()
